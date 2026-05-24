@@ -1,16 +1,25 @@
-from flask import Flask, request, jsonify
-import sqlite3
 import os
+import sqlite3
+import logging
+from flask import Flask, request, jsonify
+from prometheus_client import generate_latest, Counter, CONTENT_TYPE_LATEST
+
+# --- Observabilidad: Configuración de Logs Estructurados ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"timestamp": "%(asctime)s", "level": "%(levelname)s", "message": "%(message)s"}'
+)
 
 app = Flask(__name__)
 DB_PATH = os.environ.get("DB_PATH", "tasks.db")
 
+# --- Observabilidad: Métricas de Prometheus ---
+REQUEST_COUNT = Counter('app_requests_total', 'Total de peticiones', ['method', 'endpoint', 'http_status'])
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
-
 
 def init_db():
     conn = get_db()
@@ -26,14 +35,34 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 init_db()
 
+# --- Middleware para logs de acceso y métricas ---
+@app.after_request
+def after_request(response):
+    REQUEST_COUNT.labels(method=request.method, endpoint=request.path, http_status=response.status_code).inc()
+    logging.info(f"Peticion procesada: {request.method} {request.path} - Status: {response.status_code}")
+    return response
 
+# --- Observabilidad: Endpoints de Control ---
+@app.route("/health", methods=["GET"])
+def health():
+    try:
+        conn = get_db()
+        conn.execute("SELECT 1")
+        conn.close()
+        return jsonify({"status": "UP", "database": "connected"}), 200
+    except Exception as e:
+        return jsonify({"status": "DOWN", "error": str(e)}), 500
+
+@app.route("/metrics", methods=["GET"])
+def metrics():
+    return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+
+# --- Tus Endpoints Originales ---
 @app.route("/", methods=["GET"])
 def index():
     return jsonify({"name": "To-Do API", "version": "1.0.0", "endpoints": ["/tasks"]})
-
 
 @app.route("/tasks", methods=["GET"])
 def list_tasks():
@@ -42,27 +71,18 @@ def list_tasks():
     conn.close()
     return jsonify([dict(t) for t in tasks])
 
-
 @app.route("/tasks", methods=["POST"])
 def create_task():
     data = request.get_json()
     if not data or "title" not in data:
         return jsonify({"error": "El campo 'title' es obligatorio"}), 400
-
-    title = data["title"]
-    description = data.get("description", "")
-
     conn = get_db()
-    cursor = conn.execute(
-        "INSERT INTO tasks (title, description) VALUES (?, ?)",
-        (title, description),
-    )
+    cursor = conn.execute("INSERT INTO tasks (title, description) VALUES (?, ?)", (data["title"], data.get("description", "")))
     task_id = cursor.lastrowid
     conn.commit()
     task = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     conn.close()
     return jsonify(dict(task)), 201
-
 
 @app.route("/tasks/<int:task_id>", methods=["GET"])
 def get_task(task_id):
@@ -73,32 +93,24 @@ def get_task(task_id):
         return jsonify({"error": "Tarea no encontrada"}), 404
     return jsonify(dict(task))
 
-
 @app.route("/tasks/<int:task_id>", methods=["PUT"])
 def update_task(task_id):
     data = request.get_json()
     if not data:
         return jsonify({"error": "No se enviaron datos"}), 400
-
     conn = get_db()
     task = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     if task is None:
         conn.close()
         return jsonify({"error": "Tarea no encontrada"}), 404
-
     title = data.get("title", task["title"])
     description = data.get("description", task["description"])
     completed = data.get("completed", task["completed"])
-
-    conn.execute(
-        "UPDATE tasks SET title=?, description=?, completed=? WHERE id=?",
-        (title, description, completed, task_id),
-    )
+    conn.execute("UPDATE tasks SET title=?, description=?, completed=? WHERE id=?", (title, description, completed, task_id))
     conn.commit()
     task = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     conn.close()
     return jsonify(dict(task))
-
 
 @app.route("/tasks/<int:task_id>", methods=["DELETE"])
 def delete_task(task_id):
@@ -107,12 +119,10 @@ def delete_task(task_id):
     if task is None:
         conn.close()
         return jsonify({"error": "Tarea no encontrada"}), 404
-
     conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     conn.commit()
     conn.close()
     return jsonify({"message": "Tarea eliminada"}), 200
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
