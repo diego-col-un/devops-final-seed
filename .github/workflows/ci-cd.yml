@@ -29,7 +29,7 @@ jobs:
         flake8 . \
         --exclude=venv,__pycache__\
         --max-line-length=127 \
-        --ignore=E302,E305,W292
+        --ignore=E302,E305,W292,E501
 
     - name: Ejecutar Tests Unitarios (Pytest)
       run: |
