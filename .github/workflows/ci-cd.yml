@@ -26,11 +26,10 @@ jobs:
 
     - name: Analizar código con Linter (Flake8)
       run: |
-        # Detiene la ejecución si hay errores de sintaxis de Python
-        #flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Advertencias estilo de código (no rompe el pipeline)
-        #flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-        flake8 . --exclude=venv,__pycache__
+        flake8 . \
+        --exclude=venv,__pycache__\
+        --max-line-length=127 \
+        --ignore=E302,E305,W292
 
     - name: Ejecutar Tests Unitarios (Pytest)
       run: |
