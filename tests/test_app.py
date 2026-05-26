@@ -1,7 +1,7 @@
 import pytest
 import os
 import json
-from app import app, init_db
+from src.app import app, init_db
 
 @pytest.fixture
 def client():
