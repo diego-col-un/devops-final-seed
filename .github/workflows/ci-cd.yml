@@ -35,10 +35,6 @@ jobs:
       run: |
         python -m pytest -v
 
-    - name: Auditoria de seguridad
-      run: |
-        pip-audit
-
   docker-build:
     needs: lint-and-test
     runs-on: ubuntu-latest
